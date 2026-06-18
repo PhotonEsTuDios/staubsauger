@@ -1,0 +1,32 @@
+{
+  "_comment": "An den IAM-User daniela-haering angehängte Policy für den Foto-Staubsauger (S3 + DynamoDB, eu-west-1). dynamodb:DeleteItem ist optional und derzeit NICHT enthalten (Inventar ist append-/dedup-orientiert).",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PhotosBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket", "s3:ListBucket", "s3:GetBucketLocation",
+        "s3:PutObject", "s3:GetObject", "s3:DeleteObject",
+        "s3:PutObjectTagging", "s3:GetObjectTagging"
+      ],
+      "Resource": [
+        "arn:aws:s3:::photonestudios-photos",
+        "arn:aws:s3:::photonestudios-photos/*"
+      ]
+    },
+    {
+      "Sid": "PhotoIndex",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable", "dynamodb:DescribeTable", "dynamodb:PutItem",
+        "dynamodb:GetItem", "dynamodb:BatchWriteItem", "dynamodb:BatchGetItem",
+        "dynamodb:UpdateItem", "dynamodb:Query", "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:eu-west-1:030760499811:table/photonestudios-photos",
+        "arn:aws:dynamodb:eu-west-1:030760499811:table/photonestudios-photos/index/*"
+      ]
+    }
+  ]
+}

@@ -1,63 +1,64 @@
 # PhotonEsTuDios — Staubsauger 🌀
 
-**Dein persönlicher Foto-Sync:** Dropbox + iPhone/iPhoto → AWS S3 Cloud.
+**Foto-Archiv:** Bilder aus allen Quellen (Mac, Festplatte, Dropbox) flach nach
+**AWS S3 (eu-west-1)** saugen und in **DynamoDB** indexieren.
 
-Alle deine Fotos automatisch in die Cloud. Einmal einrichten, läuft immer.
+Dedup über **SHA-256**: gleicher Bildinhalt = gleicher S3-Key = kein Doppel-Upload,
+egal aus welcher Quelle. Der DynamoDB-Index ist das Inventar („was ist schon drin").
 
-## Für deine Claude-Session
-
-> "Ich bin Daniela Haering. Öffne den Staubsauger aus dem PhotonEsTuDios Repo. Ich möchte meine Fotos von Dropbox und iPhone nach S3 synchronisieren. Mein AWS-Profil ist `photon`."
-
-## Was der Staubsauger macht
+## Architektur
 
 ```
-Dropbox/Fotos/     ──┐
-                      ├──► S3: s3://photonestudios-photos/
-iPhone (iPhoto/      ──┘
- Photos.app)/
+Mac / Festplatte ──(staubsauger.py, lokal)──┐
+                                             ├──► S3: photonestudios-photos/<sha256>.<ext>  (flach)
+Dropbox ─────────(Lambda, in der Cloud)──────┘        +
+                                                   DynamoDB: photonestudios-photos  (PK = sha256)
 ```
 
-- **Dropbox:** Liest direkt aus `~/Dropbox/` (oder deinem Dropbox-Pfad)
-- **iPhone/Photos:** Exportiert aus der macOS Photos-App
-- **S3:** Lädt alles in den `photonestudios-photos` Bucket hoch
-- **Duplikate:** Werden automatisch erkannt (kein doppeltes Hochladen)
-- **Struktur:** `s3://photonestudios-photos/YYYY/MM/dateiname.jpg`
-
-## Setup (einmalig)
-
-```bash
-# 1. Dieses Repo klonen
-git clone https://github.com/PhotonEsTuDios/staubsauger
-cd staubsauger
-
-# 2. Python-Abhängigkeiten installieren
-pip install boto3 pillow
-
-# 3. AWS-Profil prüfen
-aws s3 ls --profile photon
-
-# 4. Staubsauger starten
-python staubsauger.py --profile photon --dropbox ~/Dropbox --iphoto
-```
-
-## Optionen
-
-| Flag | Bedeutung |
+| Komponente | Wert |
 |---|---|
-| `--dropbox PATH` | Pfad zu deinem Dropbox-Ordner |
-| `--iphoto` | Fotos aus macOS Photos.app exportieren |
-| `--dry-run` | Nur anzeigen, was hochgeladen würde |
-| `--since DATUM` | Nur Fotos ab diesem Datum (z.B. `2026-01-01`) |
-| `--profile NAME` | AWS-Profil (Standard: `photon`) |
+| Region | `eu-west-1` (Irland) |
+| S3-Bucket | `photonestudios-photos` |
+| DynamoDB-Tabelle | `photonestudios-photos` (PK `sha256`, On-Demand) |
+| AWS-Profil | `photon` |
+| Account | `030760499811` · IAM-User `daniela-haering` |
 
-## Automatisch ausführen (täglich)
+## DynamoDB-Schema (pro Bild)
+`sha256` (PK), `s3_key`, `s3_bucket`, `original_filename`, `source_path`, `source`,
+`taken_at`, `ym` (YYYY-MM), `gps_lat`, `gps_lon`, `camera_make`, `camera_model`,
+`lens`, `iso`, `f_number`, `exposure`, `focal_length`, `width`, `height`, `bytes`,
+`mime`, `uploaded_at`.
+
+## Lokal saugen (Mac / Festplatte)
 
 ```bash
-# In Terminal eingeben (läuft jeden Tag um 02:00 Uhr):
-crontab -e
-# Zeile hinzufügen:
-0 2 * * * cd ~/staubsauger && python staubsauger.py --profile photon --dropbox ~/Dropbox --iphoto
+python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+brew install exiftool   # einmalig, für Metadaten (inkl. RAW/HEIC/Video)
+
+# Probelauf (nichts wird hochgeladen):
+python staubsauger.py ~/Photos/Claude-Workspace --source mac:claude-workspace --dry-run
+
+# Echt, gedeckelt:
+python staubsauger.py ~/Photos/Claude-Workspace --source mac:claude-workspace --limit 20
+
+# Festplatte, nur ab Datum:
+python staubsauger.py /Volumes/LaCie/Shoots --source drive:lacie --since 2026-01-01
 ```
+
+Flags: `--source` (Pflicht, Quellen-Label) · `--profile` · `--region` · `--bucket`
+· `--table` · `--since YYYY-MM-DD` · `--limit N` · `--dry-run`.
+
+## Dropbox (in der Cloud, nicht über den Rechner)
+Siehe **`dropbox_cloud/`** — Lambda zieht direkt von Dropbox. Secrets in AWS Secrets
+Manager (`photonestudios/dropbox`), **nie im Repo**. Setup: `infra/RAINER-cloud-setup.md`.
+
+## Status (Stand 19.06.2026)
+- ✅ **Lokale Pipeline** fertig & getestet — Testballon mit ~40 Bildern aus
+  `~/Photos/Claude-Workspace` gelaufen, Dedup verifiziert.
+- ✅ **S3-Bucket + DynamoDB-Tabelle** angelegt und beschreibbar.
+- 🔜 **Dropbox-Cloud-Ingest**: Code fertig (`dropbox_cloud/handler.py`), noch nicht
+  deployt — braucht Dropbox-App (Daniela) + Lambda/Secrets-Rechte (Rainer).
+- 🔜 **Volle EXIF in der Cloud** via exiftool-Lambda-Layer (optional).
 
 ---
-*PhotonEsTuDios · Granada, Andalucía*
+*PhotonEsTuDios · Granada, Andalucía · in Zusammenarbeit mit LaMusicaEsTuDios*

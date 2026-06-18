@@ -1,0 +1,4 @@
+boto3>=1.34
+# exiftool wird als System-Binary erwartet (macOS: `brew install exiftool`).
+# Für die Cloud-Variante (dropbox_cloud/) ist boto3 in der Lambda-Runtime
+# bereits vorhanden; exiftool dort optional via Lambda-Layer.

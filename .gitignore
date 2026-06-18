@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets — NIEMALS committen (Dropbox-Tokens, AWS-Keys etc.)
+.env
+*.secret
+secrets.json
+**/secrets/
+
+# Lambda-Build-Artefakte
+*.zip
+build/
+
+# macOS
+.DS_Store
