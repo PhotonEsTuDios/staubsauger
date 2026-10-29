@@ -21,7 +21,8 @@ import boto3
 from PIL import Image, ExifTags
 
 REGION = "eu-west-1"
-TABLE = "photonestudios-photos"
+TABLE = os.environ.get("PHOTON_TABLE", "photonestudios-photos")
+BUCKET = os.environ.get("PHOTON_BUCKET", "photonestudios-photos")
 EXIF_VERSION = 2  # v2: taken_at auch bei NULL setzen
 WORKERS = int(os.environ.get("PHOTON_EXIF_WORKERS", "16"))
 HEADER_BYTES = 262144
@@ -63,7 +64,7 @@ def extract(img):
 def process(item):
     sha, key = item["sha256"], item["s3_key"]
     try:
-        obj = s3.get_object(Bucket="photonestudios-photos", Key=key,
+        obj = s3.get_object(Bucket=BUCKET, Key=key,
                             Range=f"bytes=0-{HEADER_BYTES - 1}")
         data = obj["Body"].read()
         try:

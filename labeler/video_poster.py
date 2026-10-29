@@ -17,8 +17,8 @@ from concurrent.futures import ThreadPoolExecutor
 import boto3
 
 REGION = "eu-west-1"
-TABLE = "photonestudios-photos"
-BUCKET = "photonestudios-photos"
+TABLE = os.environ.get("PHOTON_TABLE", "photonestudios-photos")
+BUCKET = os.environ.get("PHOTON_BUCKET", "photonestudios-photos")
 POSTER_VERSION = 1
 WORKERS = int(os.environ.get("PHOTON_POSTER_WORKERS", "6"))
 VIDEO_EXTS = {".mov", ".mp4", ".m4v"}

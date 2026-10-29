@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import boto3
 from boto3.s3.transfer import TransferConfig
 
-BUCKET = "photonestudios-photos"
+BUCKET = os.environ.get("PHOTON_BUCKET", "photonestudios-photos")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -23,7 +23,7 @@ def main():
     a = ap.parse_args()
     root = a.root.rstrip("/") + "/"
     prefix = a.prefix.rstrip("/") + "/"
-    s3 = boto3.Session(profile_name="photon", region_name="eu-west-1").client("s3")
+    s3 = boto3.Session(profile_name=os.environ.get("AWS_PROFILE", "photon"), region_name="eu-west-1").client("s3")
     cfg = TransferConfig(multipart_threshold=64 * 1024**2, max_concurrency=a.part_concurrency)
 
     paths = [l.rstrip("\n") for l in open(a.listfile, encoding="utf-8") if l.strip()]

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Stand des S3-Imports:  AWS_PROFILE=photon python status.py [timemachine-2024-12-14]"""
-import sys, boto3
+import os, sys, boto3
 name = sys.argv[1] if len(sys.argv) > 1 else "timemachine-2024-12-14"
 ses = boto3.Session(region_name="eu-west-1")
-it = ses.resource("dynamodb").Table("photonestudios-photos").get_item(Key={"sha256": f"__s3import__:{name}"}).get("Item")
+it = ses.resource("dynamodb").Table(os.environ.get("PHOTON_TABLE", "photonestudios-photos")).get_item(Key={"sha256": f"__s3import__:{name}"}).get("Item")
 if not it:
     sys.exit("noch kein Plan gelaufen")
 f = int(it["already_files"]) + int(it["done_files"]); b = int(it["already_bytes"]) + int(it["done_bytes"])

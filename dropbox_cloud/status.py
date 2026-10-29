@@ -39,7 +39,7 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tif", ".tiff",
               ".mov", ".mp4", ".m4v"}
 
 sm = boto3.client("secretsmanager", region_name=REGION)
-ddb = boto3.resource("dynamodb", region_name=REGION).Table("photonestudios-photos")
+ddb = boto3.resource("dynamodb", region_name=REGION).Table(os.environ.get("PHOTON_TABLE", "photonestudios-photos"))
 lam = boto3.client("lambda", region_name=REGION)
 events = boto3.client("events", region_name=REGION)
 

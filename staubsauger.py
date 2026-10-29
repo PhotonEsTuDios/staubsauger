@@ -29,8 +29,8 @@ import boto3
 from botocore.exceptions import ClientError
 
 # ── feste Stammdaten (PhotonEsTuDios) ──────────────────────────────────────
-BUCKET = "photonestudios-photos"
-TABLE = "photonestudios-photos"
+BUCKET = os.environ.get("PHOTON_BUCKET", "photonestudios-photos")
+TABLE = os.environ.get("PHOTON_TABLE", "photonestudios-photos")
 REGION = "eu-west-1"
 
 IMAGE_EXTS = {

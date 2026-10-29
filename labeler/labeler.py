@@ -21,7 +21,8 @@ import numpy as np
 from PIL import Image
 
 REGION = "eu-west-1"
-TABLE = "photonestudios-photos"
+TABLE = os.environ.get("PHOTON_TABLE", "photonestudios-photos")
+BUCKET = os.environ.get("PHOTON_BUCKET", "photonestudios-photos")
 LABEL_VERSION = 1
 WORKERS = int(os.environ.get("PHOTON_LABEL_WORKERS", "8"))
 MAXDIM = 1024  # auf diese Kantenlaenge runterskalieren -> konsistente Schaerfe-Skala
@@ -78,7 +79,7 @@ def process(item: dict) -> str:
     sha = item["sha256"]
     key = item["s3_key"]
     try:
-        body = s3.get_object(Bucket="photonestudios-photos", Key=key)["Body"].read()
+        body = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
         img = Image.open(io.BytesIO(body))
         m = analyze(img)
         ddb.update_item(

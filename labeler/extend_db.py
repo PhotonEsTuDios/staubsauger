@@ -2,9 +2,10 @@
 an. DynamoDB ist schemalos -> die echten Felder entstehen beim ersten UpdateItem
 des Labelers. Dieser Marker haelt fest, WELCHE Felder ein gelabeltes Foto traegt.
 """
+import os
 import boto3
 
-ddb = boto3.resource("dynamodb", region_name="eu-west-1").Table("photonestudios-photos")
+ddb = boto3.resource("dynamodb", region_name="eu-west-1").Table(os.environ.get("PHOTON_TABLE", "photonestudios-photos"))
 
 SCHEMA = {
     "sha256": "__label_schema__",

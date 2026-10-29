@@ -4,8 +4,8 @@
 #   AWS_PROFILE=<admin> ./setup-aws.sh
 set -euo pipefail
 cd "$(dirname "$0")"
-R=eu-west-1; A=030760499811; FN=photon-s3importer; ROLE=photon-s3importer-role
-Q=photon-s3import; DLQ=photon-s3import-dlq; B=photonestudios-photos; T=photonestudios-photos
+R=eu-west-1; A=$(aws sts get-caller-identity --query Account --output text); FN=photon-s3importer; ROLE=photon-s3importer-role
+Q=photon-s3import; DLQ=photon-s3import-dlq; B=${PHOTON_BUCKET:-photonestudios-photos}; T=${PHOTON_TABLE:-photonestudios-photos}
 export AWS_REGION=$R AWS_PAGER=""
 ME=$(aws sts get-caller-identity --query Arn --output text) || { echo "✗ Keine gültigen AWS-Zugangsdaten (AWS_PROFILE=${AWS_PROFILE:-})"; exit 1; }
 echo "  angemeldet als $ME"

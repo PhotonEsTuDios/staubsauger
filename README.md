@@ -62,3 +62,16 @@ Manager (`photonestudios/dropbox`), **nie im Repo**. Setup: `infra/RAINER-cloud-
 
 ---
 *PhotonEsTuDios · Granada, Andalucía · in Zusammenarbeit mit LaMusicaEsTuDios*
+
+## Konfiguration (Account-Umzug, infra#11)
+
+Alle Skripte und Lambdas lesen Ziel-Bucket, Tabelle und Profil aus der Umgebung.
+Ohne Angabe gelten die alten Werte, deshalb ändert sich am laufenden Betrieb nichts.
+
+| Variable | Standard | Bedeutung |
+|---|---|---|
+| `PHOTON_BUCKET` | `photonestudios-photos` | Archiv-Bucket |
+| `PHOTON_TABLE` | `photonestudios-photos` | DynamoDB-Index |
+| `AWS_PROFILE` | `photon` | AWS-Profil auf dem Mac (`photon-new` = neuer Account) |
+
+`s3importer/setup-aws.sh` ermittelt die Account-ID selbst aus dem aktiven Profil.

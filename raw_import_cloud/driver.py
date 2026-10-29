@@ -17,7 +17,7 @@ import argparse, json, os, time
 import boto3
 from botocore.config import Config
 
-B = "photonestudios-photos"
+B = os.environ.get("PHOTON_BUCKET", "photonestudios-photos")
 FN = os.environ.get("PHOTON_IMPORT_FUNCTION", "photon-dropbox-ingest")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
