@@ -96,6 +96,7 @@ def main():
 
     t0 = time.time()
     st = {"bytes": 0, "batches": 0}
+    hang_count = {}
 
     def write_progress(state, current=""):
         ok = [k for k, p in done.items() if p[2] != "err" and k in size_of]
@@ -143,6 +144,15 @@ def main():
                         if r["status"] != "err":
                             st["bytes"] += size_of.get(k, 0)
                 st["batches"] += 1
+                for k in res.get("hung", []):  # 2x hängend -> als Fehler verbuchen, nicht endlos wiederholen
+                    hang_count[k] = hang_count.get(k, 0) + 1
+                    if hang_count[k] >= 2:
+                        p = [k, "", "err", "hängt in der Lambda (2x Timeout)"]
+                        got[k] = {"key": k, "status": "err"}; done[k] = p
+                        with open(resf, "a") as f:
+                            f.write("\t".join(p) + "\n")
+                if res.get("hung"):
+                    log(f"hängend: {res['hung'][:5]}")
                 pend = set(res.get("pending", []))
                 batch = [x for x in batch if x["key"] not in got]  # pending + verlorene nochmal
                 bb = sum(x["size"] for x in batch)

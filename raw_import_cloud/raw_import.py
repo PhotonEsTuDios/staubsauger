@@ -27,6 +27,7 @@ import os
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -39,8 +40,8 @@ from meta import IMG_EXTS, VID_EXTS, meta_for_file, video_meta
 
 BUCKET = os.environ.get("PHOTON_BUCKET", "photonestudios-photos")
 TABLE = os.environ.get("PHOTON_TABLE", "photonestudios-photos")
-WORKERS = int(os.environ.get("PHOTON_RAW_WORKERS", "10"))
-BIG = int(os.environ.get("PHOTON_RAW_BIG_BYTES", str(400 * 1024 * 1024)))
+WORKERS = int(os.environ.get("PHOTON_RAW_WORKERS", "24"))
+BIG = int(os.environ.get("PHOTON_RAW_BIG_BYTES", str(200 * 1024 * 1024)))
 SAFETY_MS = int(os.environ.get("PHOTON_RAW_SAFETY_MS", "300000"))
 CHUNK = 8 * 1024 * 1024
 TMPDIR = "/tmp"
@@ -52,9 +53,19 @@ _big_sem = threading.Semaphore(2)  # große Dateien: höchstens 2 gleichzeitig
 
 
 # ---- HTTP (presigned) ------------------------------------------------------
-def _get(url, rng=None, timeout=120):
+def _get(url, rng=None, timeout=30, tries=5):
+    """GET mit kurzem Socket-Timeout + Wiederholung. Ein hängender TLS-Handshake
+    (kam vor) blockierte vorher bis zu 300 s und bremste den ganzen Batch."""
     req = urllib.request.Request(url, headers={"Range": f"bytes={rng[0]}-{rng[1]}"} if rng else {})
-    return urllib.request.urlopen(req, timeout=timeout)
+    for attempt in range(tries):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError:
+            raise
+        except Exception:
+            if attempt == tries - 1:
+                raise
+            time.sleep(1 + attempt * 2)
 
 
 def _range_reader(url, size):
@@ -197,18 +208,18 @@ def _process(it, source):
             st = _register(sha, ext, size, it, source, meta,
                            lambda k: _s3.upload_file(tmp, BUCKET, k, ExtraArgs={"ContentType": _mime(ext), "Metadata": _s3_meta(it, source)}))
         elif size <= BIG:
-            with _get(it["url"], timeout=300) as r:
+            with _get(it["url"], timeout=60) as r:
                 tmp, sha, size = _stream_to_tmp(r, ext)
             meta = meta_for_file(tmp, ext, size)
             st = _register(sha, ext, size, it, source, meta,
                            lambda k: _s3.upload_file(tmp, BUCKET, k, ExtraArgs={"ContentType": _mime(ext), "Metadata": _s3_meta(it, source)}))
         else:  # groß: 1. Durchlauf hashen, 2. Durchlauf streamend hochladen
             with _big_sem:
-                with _get(it["url"], timeout=300) as r:
+                with _get(it["url"], timeout=60) as r:
                     sha, size = _hash_stream(r)
                 meta = video_meta(_range_reader(it["url"], size), size) if ext in VID_EXTS else {}
                 def up(k):
-                    with _get(it["url"], timeout=300) as r2:
+                    with _get(it["url"], timeout=60) as r2:
                         _s3.upload_fileobj(r2, BUCKET, k, ExtraArgs={"ContentType": _mime(ext), "Metadata": _s3_meta(it, source)},
                                            Config=TransferConfig(multipart_chunksize=64 * 1024 * 1024, max_concurrency=4))
                 st = _register(sha, ext, size, it, source, meta, up)
@@ -224,30 +235,36 @@ def _process(it, source):
 def handle(event, context):
     source = event["source"]
     items = event.get("items", [])
-    results, pending = [], []
-    lock = threading.Lock()
+    results, pending, hung = [], [], []
     t0 = time.time()
 
     def time_left_ms():
         return context.get_remaining_time_in_millis() if context else 10 ** 9
 
-    with concurrent.futures.ThreadPoolExecutor(WORKERS) as pool:
-        futs = {}
-        idx = 0
+    # Kein "with": bei hängenden Threads (z.B. defekte Datei) nicht auf sie warten,
+    # sondern kurz vor dem Lambda-Timeout mit allen fertigen Ergebnissen zurückkehren.
+    pool = concurrent.futures.ThreadPoolExecutor(WORKERS)
+    futs = {}
+    idx = 0
+    try:
         while idx < len(items) or futs:
             while idx < len(items) and len(futs) < WORKERS and time_left_ms() > SAFETY_MS:
                 futs[pool.submit(_process, items[idx], source)] = items[idx]; idx += 1
             if idx < len(items) and time_left_ms() <= SAFETY_MS:
-                pending = [x["key"] for x in items[idx:]]; idx = len(items)
+                pending += [x["key"] for x in items[idx:]]; idx = len(items)
             if not futs:
                 break
-            done, _ = concurrent.futures.wait(list(futs), return_when=concurrent.futures.FIRST_COMPLETED)
+            if time_left_ms() < 45000:  # Notbremse: Rest als hängend melden
+                hung = [x["key"] for x in futs.values()]
+                break
+            done, _ = concurrent.futures.wait(list(futs), timeout=5, return_when=concurrent.futures.FIRST_COMPLETED)
             for f in done:
                 futs.pop(f)
-                with lock:
-                    results.append(f.result())
-    print(f"raw-import batch: {len(results)} fertig, {len(pending)} offen, {time.time()-t0:.0f}s")
-    return {"results": results, "pending": pending}
+                results.append(f.result())
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    print(f"raw-import batch: {len(results)} fertig, {len(pending)} offen, {len(hung)} hängend, {time.time()-t0:.0f}s")
+    return {"results": results, "pending": pending, "hung": hung}
 
 
 def zip_list(event, context):
