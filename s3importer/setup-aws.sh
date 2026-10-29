@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# EINMALIG mit Admin-Rechten (Rainer): legt alles für photon-s3importer an,
-# gibt daniela-haering Deploy-/Start-Rechte und startet den Import.
-#   AWS_PROFILE=<admin> ./setup-aws.sh
+# Legt alles für photon-s3importer an (idempotent) und startet den Import.
+# Läuft komplett in der Cloud: Plan-Aufruf → SQS → Worker (20 parallel). Der Mac stößt nur an.
+#   AWS_PROFILE=photon-new PHOTON_BUCKET=photonestudios-archive PYTHON=~/PhotonEsTuDios/.venv/bin/python ./setup-aws.sh
+# Ohne Start des Imports: START=0 ./setup-aws.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 R=eu-west-1; A=$(aws sts get-caller-identity --query Account --output text); FN=photon-s3importer; ROLE=photon-s3importer-role
@@ -10,16 +11,13 @@ export AWS_REGION=$R AWS_PAGER=""
 ME=$(aws sts get-caller-identity --query Arn --output text) || { echo "✗ Keine gültigen AWS-Zugangsdaten (AWS_PROFILE=${AWS_PROFILE:-})"; exit 1; }
 echo "  angemeldet als $ME"
 
-echo "▸ 0/6 Dropbox-Zeitplan aus (Dropbox-Lambda nur noch manuell)"
-aws events disable-rule --name photon-dropbox-hourly || echo "  (Regel nicht gefunden)"
-
-echo "▸ 1/6 SQS-Queues"
+echo "▸ 1/5 SQS-Queues"
 DLQ_URL=$(aws sqs create-queue --queue-name $DLQ --attributes MessageRetentionPeriod=1209600 --query QueueUrl --output text)
 DLQ_ARN="arn:aws:sqs:$R:$A:$DLQ"
 Q_URL=$(aws sqs create-queue --queue-name $Q --attributes "{\"VisibilityTimeout\":\"1000\",\"MessageRetentionPeriod\":\"1209600\",\"RedrivePolicy\":\"{\\\"deadLetterTargetArn\\\":\\\"$DLQ_ARN\\\",\\\"maxReceiveCount\\\":\\\"3\\\"}\"}" --query QueueUrl --output text)
 Q_ARN="arn:aws:sqs:$R:$A:$Q"
 
-echo "▸ 2/6 Rolle $ROLE"
+echo "▸ 2/5 Rolle $ROLE"
 aws iam create-role --role-name $ROLE --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null 2>&1 || echo "  (Rolle existiert schon)"
 aws iam put-role-policy --role-name $ROLE --policy-name s3importer --policy-document "{
  \"Version\":\"2012-10-17\",\"Statement\":[
@@ -32,11 +30,13 @@ aws iam put-role-policy --role-name $ROLE --policy-name s3importer --policy-docu
  ]}"
 sleep 12  # IAM-Propagation
 
-echo "▸ 3/6 Lambda $FN"
+echo "▸ 3/5 Lambda $FN"
 ZIP=$(PYTHON="${PYTHON:-python3}" ./build.sh)
-ENV="Variables={PHOTON_QUEUE_URL=$Q_URL}"
+ENV="Variables={PHOTON_QUEUE_URL=$Q_URL,PHOTON_BUCKET=$B,PHOTON_TABLE=$T}"
 if aws lambda get-function --function-name $FN >/dev/null 2>&1; then
   aws lambda update-function-code --function-name $FN --zip-file "fileb://$ZIP" >/dev/null
+  aws lambda wait function-updated-v2 --function-name $FN
+  aws lambda update-function-configuration --function-name $FN --environment "$ENV" >/dev/null
 else
   aws lambda create-function --function-name $FN --runtime python3.12 --architectures arm64 \
     --handler handler.handler --role arn:aws:iam::$A:role/$ROLE --timeout 900 --memory-size 3008 \
@@ -44,22 +44,14 @@ else
 fi
 aws lambda wait function-active-v2 --function-name $FN
 
-echo "▸ 4/6 SQS-Trigger (20 parallel)"
+echo "▸ 4/5 SQS-Trigger (20 parallel)"
 aws lambda create-event-source-mapping --function-name $FN --event-source-arn $Q_ARN --batch-size 1 \
   --function-response-types ReportBatchItemFailures --scaling-config MaximumConcurrency=20 >/dev/null 2>&1 \
   || echo "  (Trigger existiert schon)"
 
-echo "▸ 5/6 Rechte für daniela-haering (Deploy, Start, Status)"
-aws iam put-user-policy --user-name daniela-haering --policy-name photon-s3importer-ops --policy-document "{
- \"Version\":\"2012-10-17\",\"Statement\":[
-  {\"Effect\":\"Allow\",\"Action\":[\"lambda:UpdateFunctionCode\",\"lambda:UpdateFunctionConfiguration\",\"lambda:GetFunction\",\"lambda:GetFunctionConfiguration\",\"lambda:InvokeFunction\"],\"Resource\":\"arn:aws:lambda:$R:$A:function:$FN\"},
-  {\"Effect\":\"Allow\",\"Action\":[\"lambda:ListEventSourceMappings\",\"lambda:GetEventSourceMapping\",\"lambda:UpdateEventSourceMapping\"],\"Resource\":\"*\"},
-  {\"Effect\":\"Allow\",\"Action\":[\"sqs:GetQueueAttributes\",\"sqs:GetQueueUrl\",\"sqs:PurgeQueue\",\"sqs:ReceiveMessage\",\"sqs:SendMessage\"],\"Resource\":[\"$Q_ARN\",\"$DLQ_ARN\"]},
-  {\"Effect\":\"Allow\",\"Action\":[\"logs:FilterLogEvents\",\"logs:GetLogEvents\",\"logs:DescribeLogStreams\"],\"Resource\":\"arn:aws:logs:$R:$A:log-group:/aws/lambda/$FN:*\"}
- ]}"
-
-echo "▸ 6/6 Import starten (Plan-Aufruf, asynchron)"
+[ "${START:-1}" = 1 ] || { echo "✅ Eingerichtet, Import NICHT gestartet (START=0)"; exit 0; }
+echo "▸ 5/5 Import starten (Plan-Aufruf, asynchron)"
 aws lambda invoke --function-name $FN --invocation-type Event \
   --cli-binary-format raw-in-base64-out \
   --payload '{"mode":"plan","prefix":"raw/timemachine-2024-12-14/","source":"timemachine:2024-12-14"}' /dev/null >/dev/null
-echo "✅ Fertig. Stand: Gallery → Import, oder: AWS_PROFILE=photon python status.py"
+echo "✅ Fertig. Stand: Gallery → Import, oder: AWS_PROFILE=$AWS_PROFILE PHOTON_TABLE=$T python status.py"
