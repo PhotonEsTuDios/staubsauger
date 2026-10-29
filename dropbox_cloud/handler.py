@@ -261,16 +261,6 @@ def _save_run(counts, pages, last_path, reason, started):
 
 
 def handler(event, context):
-    # Zweiter Modus derselben Lambda: Import aus dem S3-Rohspiegel
-    # (raw_import_cloud/). Ohne "mode" läuft unverändert der Dropbox-Ingest.
-    mode = event.get("mode") if isinstance(event, dict) else None
-    if mode == "raw-import":
-        import raw_import
-        return raw_import.handle(event, context)
-    if mode == "raw-zip-list":
-        import raw_import
-        return raw_import.zip_list(event, context)
-
     started = time.time()
     _clean_tmp()
     sec = _secret()
