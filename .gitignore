@@ -16,3 +16,11 @@ build/
 
 # macOS
 .DS_Store
+
+# Raw-Import: lokaler Zustand, Logs, Dateilisten mit Privatpfaden
+raw_import_cloud/state/
+raw_import_cloud/logs/
+*.log
+tm-*.txt
+result-dry.tsv
+result.tsv
