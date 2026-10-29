@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "Role", "Effect": "Allow",
+      "Action": ["iam:CreateRole", "iam:PutRolePolicy", "iam:GetRole", "iam:PassRole"],
+      "Resource": "arn:aws:iam::030760499811:role/photon-s3importer-role" },
+    { "Sid": "UserOps", "Effect": "Allow",
+      "Action": ["iam:PutUserPolicy"],
+      "Resource": "arn:aws:iam::030760499811:user/daniela-haering" },
+    { "Sid": "Queue", "Effect": "Allow",
+      "Action": ["sqs:CreateQueue", "sqs:GetQueueUrl", "sqs:GetQueueAttributes", "sqs:SetQueueAttributes", "sqs:SendMessage", "sqs:ReceiveMessage", "sqs:PurgeQueue"],
+      "Resource": "arn:aws:sqs:eu-west-1:030760499811:photon-s3import*" },
+    { "Sid": "Function", "Effect": "Allow",
+      "Action": ["lambda:CreateFunction", "lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:InvokeFunction"],
+      "Resource": "arn:aws:lambda:eu-west-1:030760499811:function:photon-s3importer" },
+    { "Sid": "Trigger", "Effect": "Allow",
+      "Action": ["lambda:CreateEventSourceMapping", "lambda:ListEventSourceMappings", "lambda:GetEventSourceMapping", "lambda:UpdateEventSourceMapping"],
+      "Resource": "*" },
+    { "Sid": "DropboxSchedule", "Effect": "Allow",
+      "Action": ["events:DisableRule", "events:DescribeRule"],
+      "Resource": "arn:aws:events:eu-west-1:030760499811:rule/photon-dropbox-hourly" }
+  ]
+}
