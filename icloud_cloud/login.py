@@ -33,8 +33,22 @@ def _terms_ok(api, step):
         return api.trust_session()
 
 
+def _aws():
+    """AWS VOR dem Apple-Login prüfen, sonst ist die frische Sitzung am Ende umsonst."""
+    profile = os.environ.get("AWS_PROFILE") or "photon-new"
+    try:
+        sess = boto3.Session(profile_name=profile, region_name="eu-west-1")
+        acct = sess.client("sts").get_caller_identity()["Account"]
+    except Exception as e:
+        sys.exit(f"✗ AWS-Zugang (Profil {profile}) geht nicht: {e}")
+    if acct != "696682813662":
+        sys.exit(f"✗ Falscher AWS-Account {acct} (Profil {profile}), erwartet photon 696682813662")
+    return sess.client("secretsmanager")
+
+
 def main():
     from pyicloud import PyiCloudService
+    sm = _aws()
     apple_id = input("Apple-ID (E-Mail): ").strip()
     password = getpass.getpass("Apple-Passwort (wird nicht angezeigt, nicht gespeichert): ")
     tmp = tempfile.mkdtemp(prefix="photon-icloud-")
@@ -52,7 +66,7 @@ def main():
         n = len(api.photos.all)
         print(f"✓ Angemeldet. Mediathek: {n} Einträge")
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        session_store.save(boto3.client("secretsmanager", region_name="eu-west-1"), apple_id, tmp, stamp)
+        session_store.save(sm, apple_id, tmp, stamp)
         print(f"✓ Sitzung gespeichert in Secrets Manager {session_store.SECRET_ID} ({stamp})")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
