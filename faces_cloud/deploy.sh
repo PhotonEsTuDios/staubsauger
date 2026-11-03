@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy photon-faces (staubsauger#14) — EINZIGER Weg in die Cloud, idempotent, alle Komponenten hier:
-#   DynamoDB photonestudios-faces · SQS photon-faces (+DLQ) · IAM-Rolle · Lambda · SQS-Trigger · 2 Zeitpläne
+#   DynamoDB photonestudios-faces (+GSI cluster-index) · SQS photon-faces (+DLQ) · IAM-Rolle · Lambda · SQS-Trigger · 2 Zeitpläne
 #   AWS_PROFILE=photon-new PYTHON=~/PhotonEsTuDios/.venv/bin/python ./deploy.sh
 # Optionen: START=0 (nur einrichten) · LIMIT=50 (Pilot) · CLUSTER=1 (danach gruppieren) · PARALLEL=10
 set -euo pipefail
@@ -24,6 +24,13 @@ if ! aws dynamodb describe-table --table-name $FT >/dev/null 2>&1; then
     --tags Key=project,Value=photon >/dev/null
   aws dynamodb wait table-exists --table-name $FT
 fi
+# Index nach Gruppe (für Benennen aus der Gallery, gallery#7)
+if ! aws dynamodb describe-table --table-name $FT --query 'Table.GlobalSecondaryIndexes[].IndexName' --output text | grep -qw cluster-index; then
+  echo "  + Index cluster-index (Aufbau dauert ein paar Minuten)"
+  aws dynamodb update-table --table-name $FT --attribute-definitions AttributeName=cluster,AttributeType=S \
+    --global-secondary-index-updates '[{"Create":{"IndexName":"cluster-index","KeySchema":[{"AttributeName":"cluster","KeyType":"HASH"}],"Projection":{"ProjectionType":"INCLUDE","NonKeyAttributes":["person","crop","ignored","box","score","px"]}}}]' >/dev/null
+fi
+until [ "$(aws dynamodb describe-table --table-name $FT --query "Table.GlobalSecondaryIndexes[?IndexName=='cluster-index'].IndexStatus" --output text)" = ACTIVE ]; do sleep 15; done
 
 echo "▸ 2/7 SQS-Queues"
 aws sqs create-queue --queue-name $DLQ --attributes MessageRetentionPeriod=1209600 >/dev/null
@@ -36,7 +43,7 @@ aws iam put-role-policy --role-name $ROLE --policy-name faces --policy-document 
  \"Version\":\"2012-10-17\",\"Statement\":[
   {\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\"],\"Resource\":\"arn:aws:s3:::$B/*\"},
   {\"Effect\":\"Allow\",\"Action\":[\"s3:PutObject\"],\"Resource\":\"arn:aws:s3:::$B/faces/*\"},
-  {\"Effect\":\"Allow\",\"Action\":[\"dynamodb:Scan\",\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":[\"arn:aws:dynamodb:$R:$A:table/$T\",\"arn:aws:dynamodb:$R:$A:table/$FT\"]},
+  {\"Effect\":\"Allow\",\"Action\":[\"dynamodb:Scan\",\"dynamodb:Query\",\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":[\"arn:aws:dynamodb:$R:$A:table/$T\",\"arn:aws:dynamodb:$R:$A:table/$FT\",\"arn:aws:dynamodb:$R:$A:table/$FT/index/*\"]},
   {\"Effect\":\"Allow\",\"Action\":[\"sqs:SendMessage\",\"sqs:ReceiveMessage\",\"sqs:DeleteMessage\",\"sqs:GetQueueAttributes\",\"sqs:ChangeMessageVisibility\"],\"Resource\":\"$Q_ARN\"},
   {\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"arn:aws:logs:$R:$A:*\"}
  ]}"

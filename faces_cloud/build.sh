@@ -18,7 +18,7 @@ done
 
 BUILD="$(cd .. && pwd)/build/faces_cloud"
 rm -rf "${BUILD:?}"; mkdir -p "$BUILD/models"
-cp handler.py detect.py cluster.py store.py "$BUILD/"
+cp handler.py detect.py cluster.py people.py store.py "$BUILD/"
 cp models/*.onnx "$BUILD/models/"
 "${PYTHON:-python3}" -m pip install -q --target "$BUILD" \
   --platform manylinux_2_28_aarch64 --platform manylinux2014_aarch64 --platform manylinux_2_17_aarch64 \

@@ -170,43 +170,133 @@ def test_worker_idempotent(fake):
     assert "a" not in fs.saved
 
 
-class FakeClusterStore:
-    def __init__(self, items):
-        self.items, self.clusters, self.people, self.summary = items, {}, {}, None
+class MemStore:
+    """Speicher im RAM mit derselben Schnittstelle wie store.Store (Gesichter + Fotos + Übersicht)."""
+
+    def __init__(self, faces):
+        self.faces = {(f["sha256"], f["face"]): dict(f) for f in faces}
+        self.photos, self.summary, self.writes = {}, {"clusters": []}, 0
 
     def now(self):
         return "2026-11-03T00:00:00Z"
 
     def all_faces(self):
-        return self.items
+        return [dict(f) for f in self.faces.values() if not f.get("ignored")]
 
-    def set_cluster(self, sha, face, c):
-        self.clusters[(sha, face)] = c
+    def faces_of_cluster(self, c):
+        return [dict(f) for f in self.faces.values() if f.get("cluster") == c]
+
+    def faces_of_photo(self, sha):
+        return [dict(f) for (s, _), f in self.faces.items() if s == sha]
+
+    def set_face(self, sha, face, **fields):
+        self.writes += 1
+        f = self.faces[(sha, face)]
+        for k, v in fields.items():
+            if v is None:
+                f.pop(k, None)
+            else:
+                f[k] = v
 
     def set_photo_people(self, sha, clusters, persons):
-        self.people[sha] = (clusters, persons)
+        self.photos[sha] = (list(clusters), list(persons))
+
+    def read_summary(self):
+        return json.loads(json.dumps(self.summary))
 
     def write_summary(self, s):
         self.summary = s
 
 
-def test_cluster_ablauf(monkeypatch):
-    import handler
-    vecs, truth = _synthetic(n_people=2, per=6)
-    items = [{"sha256": f"p{i}", "face": 0, "vec": detect.vec_to_bytes(v), "px": 80, "score": 0.95,
-              "crop": f"faces/p{i}_0.jpg", "person": "Ana" if i == 0 else None} for i, v in enumerate(vecs)]
-    fs = FakeClusterStore(items)
-    monkeypatch.setattr(handler, "_store", fs)
-    out = handler.handler({"mode": "cluster"}, None)
-    assert out["clusters"] == 2 and out["faces_changed"] == 12 and out["photos_changed"] == 12
-    ana = fs.people["p0"][0][0]
-    assert all(fs.people[f"p{i}"] == ([ana], ["Ana"]) for i in range(6))  # Name geht auf die ganze Gruppe
-    assert all(fs.people[f"p{i}"][1] == [] for i in range(6, 12))
-    assert sorted(c["size"] for c in fs.summary["clusters"]) == [6, 6]
+def _people_store(seed=1):
+    """2 Personen à 6 Fotos (je 1 Gesicht), p0 schon als Ana benannt."""
+    vecs, _ = _synthetic(n_people=2, per=6, seed=seed)
+    return MemStore([{"sha256": f"p{i}", "face": 0, "vec": detect.vec_to_bytes(v), "px": 80, "score": 0.95,
+                      "crop": f"faces/p{i}_0.jpg", **({"person": "Ana"} if i == 0 else {})}
+                     for i, v in enumerate(vecs)])
 
-    # zweiter Lauf mit gespeicherten Gruppen: nichts mehr zu schreiben außer benannten Fotos
-    for it in items:
-        it["cluster"] = fs.clusters[(it["sha256"], 0)]
-    fs.clusters.clear()
-    out2 = handler.handler({"mode": "cluster"}, None)
-    assert out2["faces_changed"] == 0 and fs.clusters == {}
+
+@pytest.fixture
+def mem(monkeypatch):
+    import handler
+    st = _people_store()
+    monkeypatch.setattr(handler, "_store", st)
+    return handler, st
+
+
+def test_cluster_ablauf_name_geht_auf_gruppe(mem):
+    handler, st = mem
+    out = handler.handler({"mode": "cluster"}, None)
+    assert out["clusters"] == 2 and out["photos_changed"] == 12
+    ana = st.faces[("p0", 0)]["cluster"]
+    assert all(st.photos[f"p{i}"] == ([ana], ["Ana"]) for i in range(6))
+    assert all(st.faces[(f"p{i}", 0)]["person"] == "Ana" for i in range(6))
+    assert all(st.photos[f"p{i}"][1] == [] for i in range(6, 12))
+    assert sorted(c["size"] for c in st.summary["clusters"]) == [6, 6]
+    assert {c["person"] for c in st.summary["clusters"]} == {"Ana", None}
+
+
+def test_cluster_zweiter_lauf_schreibt_nichts(mem):
+    handler, st = mem
+    handler.handler({"mode": "cluster"}, None)
+    st.writes = 0
+    out = handler.handler({"mode": "cluster"}, None)
+    assert out["faces_changed"] == 0 and out["photos_changed"] == 0 and st.writes == 0
+
+
+def test_benennen_und_zusammenfuehren(mem):
+    handler, st = mem
+    handler.handler({"mode": "cluster"}, None)
+    other = st.faces[("p6", 0)]["cluster"]
+    out = handler.handler({"mode": "name", "cluster": other, "person": "  Santi  "}, None)
+    assert out == {"cluster": other, "person": "Santi", "faces": 6, "photos": 6}
+    assert st.photos["p7"] == ([other], ["Santi"])
+    assert next(c for c in st.summary["clusters"] if c["cluster"] == other)["person"] == "Santi"
+    # Zusammenführen = zweite Gruppe gleich benennen -> nach dem nächsten Lauf bleibt der Name
+    handler.handler({"mode": "cluster"}, None)
+    assert st.photos["p7"][1] == ["Santi"]
+
+
+def test_entnennen(mem):
+    handler, st = mem
+    handler.handler({"mode": "cluster"}, None)
+    ana = st.faces[("p0", 0)]["cluster"]
+    handler.handler({"mode": "name", "cluster": ana, "person": ""}, None)
+    assert all("person" not in st.faces[(f"p{i}", 0)] for i in range(6))
+    assert st.photos["p3"] == ([ana], [])
+
+
+def test_ausblenden(mem):
+    handler, st = mem
+    handler.handler({"mode": "cluster"}, None)
+    other = st.faces[("p6", 0)]["cluster"]
+    handler.handler({"mode": "hide", "cluster": other}, None)
+    assert all(st.faces[(f"p{i}", 0)].get("ignored") for i in range(6, 12))
+    assert st.photos["p8"] == ([], [])
+    assert other not in [c["cluster"] for c in st.summary["clusters"]]
+    out = handler.handler({"mode": "cluster"}, None)  # bleibt ausgeblendet
+    assert out["clusters"] == 1
+
+
+def test_falsches_gesicht_raus(mem):
+    handler, st = mem
+    handler.handler({"mode": "cluster"}, None)
+    handler.handler({"mode": "reject", "sha": "p2", "face": 0}, None)
+    assert st.faces[("p2", 0)]["ignored"] is True and "person" not in st.faces[("p2", 0)]
+    assert st.photos["p2"] == ([], [])
+
+
+def test_einzelnes_gesicht_benennen(mem):
+    handler, st = mem
+    handler.handler({"mode": "cluster"}, None)
+    handler.handler({"mode": "name_face", "sha": "p9", "face": 0, "person": "Nepo"}, None)
+    assert st.photos["p9"][1] == ["Nepo"]
+    handler.handler({"mode": "cluster"}, None)  # eigener Name schlägt den Gruppennamen
+    assert st.faces[("p9", 0)]["person"] == "Nepo"
+
+
+def test_name_ohne_sonderzeichen():
+    import people
+    with pytest.raises(ValueError):
+        people.clean_name("<script>")
+    assert people.clean_name("  Santi   Häring ") == "Santi Häring"
