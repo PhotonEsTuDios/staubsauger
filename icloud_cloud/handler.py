@@ -137,6 +137,11 @@ def _send(op, items, size):
             raise RuntimeError(f"SQS failed: {r['Failed']}")
 
 
+def cap_page(page, offset, limit):
+    """LIMIT exakt einhalten (Apple liefert ganze 100er-Seiten)."""
+    return page[:max(limit - offset, 0)] if limit else page
+
+
 def plan_handler(event, context):
     from assets import asset_meta
     from pyicloud.services.photos_cloudkit import DirectionEnum
@@ -169,7 +174,7 @@ def plan_handler(event, context):
 
     done = False
     while True:
-        page = list(album._get_photos_at(offset, DirectionEnum.ASCENDING, PAGE))
+        page = cap_page(list(album._get_photos_at(offset, DirectionEnum.ASCENDING, PAGE)), offset, limit)
         if not page:
             done = True
             break

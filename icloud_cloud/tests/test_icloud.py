@@ -161,3 +161,12 @@ def test_open_service_requires_trusted_session(tmp_path):
         session_store.open_service("x", str(tmp_path), Svc)
     Svc.ok = True
     assert isinstance(session_store.open_service("x", str(tmp_path), Svc), Svc)
+
+
+def test_cap_page_haelt_limit_exakt():
+    from handler import cap_page
+    page = list(range(100))
+    assert len(cap_page(page, 0, 50)) == 50
+    assert len(cap_page(page, 0, 0)) == 100      # kein Limit
+    assert cap_page(page, 100, 50) == []          # schon erreicht
+    assert len(cap_page(page, 100, 130)) == 30
