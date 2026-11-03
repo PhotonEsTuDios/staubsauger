@@ -18,7 +18,7 @@ import numpy as np
 import cluster as clu
 import detect
 
-WRITERS = 16
+WRITERS = 64  # I/O-gebunden; größte Gruppe (4.800 Gesichter) muss unter dem 30-s-CloudFront-Limit bleiben
 SAMPLES = 12
 
 
@@ -29,7 +29,7 @@ def _parallel(fn, args):
 
 def clean_name(person):
     p = " ".join(str(person or "").split())[:60]
-    if any(c in p for c in "<>\"\\/"):
+    if any(c in p for c in "<>\"\\/,"):  # Komma trennt Personen in der Gallery-URL
         raise ValueError("Ungültiger Name")
     return p
 
@@ -104,11 +104,22 @@ def _patch_summary(st, cluster, **change):
 
 def name(st, cluster, person):
     person = clean_name(person)
+    t0 = time.time()
     faces = [f for f in st.faces_of_cluster(cluster) if not f.get("ignored")]
+    t1 = time.time()
     _parallel(lambda f: st.set_face(str(f["sha256"]), int(f["face"]), person=person or None), [(f,) for f in faces])
+    t2 = time.time()
     shas = sorted({str(f["sha256"]) for f in faces})
-    _parallel(lambda sha: refresh_photo(st, sha), [(s,) for s in shas])
+    old = {f.get("person") for f in faces if f.get("person")}
+    if person and not (old - {person}):
+        # schneller Weg (häufigster Fall: unbenannte Gruppe benennen): Name nur anhängen, 1 Aufruf je Foto
+        _parallel(lambda sha: st.add_photo_person(sha, cluster, person), [(s,) for s in shas])
+    else:
+        # Entnennen/Umbenennen: Fotos genau aus ihren Gesichtern neu ableiten
+        _parallel(lambda sha: refresh_photo(st, sha), [(s,) for s in shas])
+    t3 = time.time()
     _patch_summary(st, cluster, person=person or None)
+    print(f"[name] {cluster} faces={len(faces)} query={t1-t0:.1f}s faces={t2-t1:.1f}s photos={t3-t2:.1f}s summary={time.time()-t3:.1f}s")
     return {"cluster": cluster, "person": person or None, "faces": len(faces), "photos": len(shas)}
 
 

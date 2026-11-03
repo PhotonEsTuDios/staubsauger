@@ -201,6 +201,10 @@ class MemStore:
     def set_photo_people(self, sha, clusters, persons):
         self.photos[sha] = (list(clusters), list(persons))
 
+    def add_photo_person(self, sha, cluster, person):
+        cl, ps = self.photos.get(sha, ([], []))
+        self.photos[sha] = (sorted(set(cl) | {cluster}), sorted(set(ps) | {person}))
+
     def read_summary(self):
         return json.loads(json.dumps(self.summary))
 
@@ -257,6 +261,25 @@ def test_benennen_und_zusammenfuehren(mem):
     assert st.photos["p7"][1] == ["Santi"]
 
 
+def test_benennen_zwei_gesichter_auf_einem_foto(mem):
+    handler, st = mem
+    handler.handler({"mode": "cluster"}, None)
+    ana, other = st.faces[("p0", 0)]["cluster"], st.faces[("p6", 0)]["cluster"]
+    # p6 bekommt zusätzlich ein Ana-Gesicht -> nach Benennen der anderen Gruppe beide Namen am Foto
+    st.faces[("p6", 1)] = {**st.faces[("p0", 0)], "sha256": "p6", "face": 1}
+    st.photos["p6"] = ([ana, other], ["Ana"])
+    handler.handler({"mode": "name", "cluster": other, "person": "Santi"}, None)
+    assert st.photos["p6"] == (sorted([ana, other]), ["Ana", "Santi"])
+
+
+def test_umbenennen_leitet_neu_ab(mem):
+    handler, st = mem
+    handler.handler({"mode": "cluster"}, None)
+    ana = st.faces[("p0", 0)]["cluster"]
+    handler.handler({"mode": "name", "cluster": ana, "person": "Anna"}, None)
+    assert st.photos["p1"] == ([ana], ["Anna"])  # alter Name weg, nicht nur angehängt
+
+
 def test_entnennen(mem):
     handler, st = mem
     handler.handler({"mode": "cluster"}, None)
@@ -299,4 +322,6 @@ def test_name_ohne_sonderzeichen():
     import people
     with pytest.raises(ValueError):
         people.clean_name("<script>")
+    with pytest.raises(ValueError):
+        people.clean_name("Santi, Nepo")
     assert people.clean_name("  Santi   Häring ") == "Santi Häring"

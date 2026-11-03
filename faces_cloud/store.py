@@ -23,7 +23,7 @@ PROGRESS = {"sha256": "__faces__"}
 CLUSTER_INDEX = "cluster-index"
 SUMMARY_KEY = "faces/clusters.json"
 
-_cfg = Config(connect_timeout=10, read_timeout=60, max_pool_connections=32,
+_cfg = Config(connect_timeout=10, read_timeout=60, max_pool_connections=96,
               retries={"max_attempts": 8, "mode": "adaptive"})
 
 
@@ -154,6 +154,10 @@ class Store:
         if vals:
             kw["ExpressionAttributeValues"] = vals
         self.photos.update_item(**kw)
+
+    def add_photo_person(self, sha, cluster, person):
+        self.photos.update_item(Key={"sha256": sha}, UpdateExpression="ADD persons :p, face_clusters :c",
+                                ExpressionAttributeValues={":p": {person}, ":c": {cluster}})
 
     # ---- Übersicht für die Gallery ----------------------------------------------
     def read_summary(self):
