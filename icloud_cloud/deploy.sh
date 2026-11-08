@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy photon-icloud (staubsauger#2) — EINZIGER Weg in die Cloud, idempotent, alle Komponenten hier:
 #   SQS photon-icloud (+DLQ) · 2 IAM-Rollen · Lambdas photon-icloud-plan + photon-icloud-worker
-#   · SQS-Trigger · täglicher Zeitplan (erst nach Freigabe: SCHEDULE=1)
+#   · SQS-Trigger · Zeitplan alle 15 Minuten (erst nach Freigabe: SCHEDULE=1)
 #   AWS_PROFILE=photon-new PYTHON=~/PhotonEsTuDios/.venv/bin/python ./deploy.sh
 # Optionen: RUN=dry (nur zählen, Standard) · RUN=full · RUN=0 (nichts starten) · LIMIT=50 · PARALLEL=8 · SCHEDULE=1
 # Vorher einmal: login.py (legt Secret photonestudios/icloud an).
@@ -80,8 +80,8 @@ else
   aws lambda update-event-source-mapping --uuid "$UUID" --scaling-config MaximumConcurrency=$PAR >/dev/null
 fi
 
-echo "▸ 6/7 Zeitplan täglich 03:00 UTC ($([ "${SCHEDULE:-0}" = 1 ] && echo AN || echo 'AUS — SCHEDULE=1 nach Freigabe'))"
-aws events put-rule --name photon-icloud-daily --schedule-expression "cron(0 3 * * ? *)" \
+echo "▸ 6/7 Zeitplan alle 15 Minuten ($([ "${SCHEDULE:-0}" = 1 ] && echo AN || echo 'AUS — SCHEDULE=1 nach Freigabe'))"
+aws events put-rule --name photon-icloud-daily --schedule-expression "rate(15 minutes)" \
   --state $([ "${SCHEDULE:-0}" = 1 ] && echo ENABLED || echo DISABLED) >/dev/null
 aws lambda add-permission --function-name $P --statement-id events-daily --action lambda:InvokeFunction \
   --principal events.amazonaws.com --source-arn "arn:aws:events:$R:$A:rule/photon-icloud-daily" >/dev/null 2>&1 || true

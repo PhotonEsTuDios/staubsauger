@@ -10,7 +10,7 @@ Zwei Lambdas aus demselben Zip:
         - kein Treffer                                → Paket "import": Original laden
       Pakete gehen über SQS an den Worker. Läuft die Zeit ab, ruft sich der Plan
       selbst mit dem Offset wieder auf. {"dry_run": true} zählt nur.
-      Zeitplan: täglich (EventBridge).
+      Zeitplan: alle 15 Minuten (EventBridge-Rule photon-icloud-daily, Name historisch; #16).
 
   photon-icloud-worker (handler.worker_handler, SQS-Trigger, parallel, KEIN Secret-Zugriff)
       Lädt über die vom Plan erzeugten Download-Links (kein Apple-Login nötig),

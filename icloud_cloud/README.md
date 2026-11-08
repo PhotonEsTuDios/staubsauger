@@ -24,7 +24,7 @@ Secrets Manager `photonestudios/icloud`, nie das Passwort. Läuft sie ab, zeigt 
 cd ~/PhotonEsTuDios/staubsauger/icloud_cloud
 AWS_PROFILE=photon-new PYTHON=~/PhotonEsTuDios/.venv/bin/python ./deploy.sh            # Dry-Run: nur zählen
 AWS_PROFILE=photon-new PYTHON=… RUN=full LIMIT=50 ./deploy.sh                          # Pilot 50
-AWS_PROFILE=photon-new PYTHON=… RUN=full SCHEDULE=1 ./deploy.sh                        # alles + täglich 03:00 UTC
+AWS_PROFILE=photon-new PYTHON=… RUN=full SCHEDULE=1 ./deploy.sh                        # alles + alle 15 Min (#16)
 AWS_PROFILE=photon-new ~/PhotonEsTuDios/.venv/bin/python status.py
 ```
 Tests: `~/PhotonEsTuDios/.venv/bin/python -m pytest -q tests`
