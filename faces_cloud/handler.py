@@ -8,6 +8,7 @@ Nur Ablauf; Bildlogik in detect.py, Gruppieren in cluster.py, Personen in people
   {"mode": "name"|"hide"|"reject"|"name_face", ...}  Benennen aus der Gallery (people.py).
   {"mode": "sample", "cluster", "n"?, "offset"?}       Stichprobe zum Prüfen (gallery#10).
   {"mode": "confirm", "cluster", "person", "wrong", "shown"}  Name + falsche raus (gallery#10).
+  {"mode": "not_person", "sha", "face", "person"}  „✕ nicht <Person>“ + Ähnliche raus (gallery#16).
 """
 import json
 import os
@@ -27,7 +28,8 @@ WORKERS = int(os.environ.get("PHOTON_WORKERS", "3"))
 PKG = int(os.environ.get("PHOTON_PKG", "25"))
 PEOPLE_MODES = {"name": ("cluster", "person"), "hide": ("cluster",),
                 "reject": ("sha", "face"), "name_face": ("sha", "face", "person"),
-                "confirm": ("cluster", "person", "wrong", "shown")}
+                "confirm": ("cluster", "person", "wrong", "shown"),
+                "not_person": ("sha", "face", "person")}
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 
 _store = None

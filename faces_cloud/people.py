@@ -10,6 +10,7 @@ Grundregel: Wahrheit liegt am **Gesicht** (cluster, person, ignored). Fotos (`fa
   name_face(sha, face, person)  ein einzelnes Gesicht benennen (Lightbox)
   sample(cluster, n, offset)    Stichprobe zum Prüfen: Ausreißer zuerst + ein paar typische (gallery#10)
   confirm(cluster, person, wrong, shown)  Name + „nicht diese Person“; Ähnliche im Rest werden mit entfernt
+  not_person(sha, face, person)  ein Gesicht ist NICHT die Person (gallery#16); Ähnliche der Person fliegen mit raus
 """
 import time
 from collections import defaultdict
@@ -246,4 +247,57 @@ def confirm(st, cluster, person, wrong, shown):
     res = {"cluster": cluster, "person": person, "faces": len(keep), "photos": len(keep_shas),
            "removed": len(wrong_k & set(map(_key, faces))), "auto_removed": len(auto)}
     print(f"[confirm] {res} {time.time() - t0:.1f}s")
+    return res
+
+
+# ---- „✕ nicht <Person>“ aus dem Album-Vorschlag (gallery#16) -------------------------------
+SPREAD_MIN = 0.5      # nur wirklich ähnliche Gesichter mitnehmen (SFace-Kosinus)
+SPREAD_MARGIN = 0.05  # dem Falschen deutlich ähnlicher als dem Kern
+OUTLIER_PCT = 10      # angeklicktes Gesicht muss unähnlicher zum Kern sein als 90 % der übrigen (Schutz vor Fehlklick)
+
+
+def spread_from_one(m, wrong_i, min_sim=SPREAD_MIN):
+    """Gesichter, die dem falschen (wrong_i) deutlich ähnlicher sind als dem Kern der übrigen und >= min_sim.
+    Nur wenn das falsche Gesicht selbst ein Ausreißer ist – sonst (Fehlklick auf die echte Person) nichts mitnehmen."""
+    rest = np.ones(len(m), bool)
+    rest[wrong_i] = False
+    if rest.sum() < 5:
+        return set()
+    centre = m[rest].mean(axis=0)
+    centre /= np.linalg.norm(centre) + 1e-9
+    sw = m @ m[wrong_i]
+    sc = m @ centre
+    if sc[wrong_i] >= np.percentile(sc[rest], OUTLIER_PCT):
+        return set()
+    return {int(i) for i in np.nonzero((sw >= min_sim) & (sw > sc + SPREAD_MARGIN))[0] if i != wrong_i}
+
+
+def not_person(st, sha, face, person):
+    person = clean_name(person)
+    if not person:
+        raise ValueError("Name fehlt")
+    t0 = time.time()
+    clusters = [c["cluster"] for c in st.read_summary().get("clusters", []) if c.get("person") == person]
+    faces = [f for c in clusters for f in st.faces_of_cluster(c) if not f.get("ignored") and f.get("person") == person]
+    vfaces, m = _with_vectors(st, faces)
+    idx = {_key(f): i for i, f in enumerate(vfaces)}
+    target = (str(sha), int(face))
+    out_k = {target}
+    if target in idx:
+        out_k |= {_key(vfaces[i]) for i in spread_from_one(m, idx[target])}
+    _parallel(lambda k: st.set_face(*k, cluster=None, person=None, not_person=person), [(k,) for k in sorted(out_k)])
+    _parallel(lambda s: refresh_photo(st, s), [(s,) for s in sorted({k[0] for k in out_k})])
+    # Übersicht: Gruppengrößen der Person anpassen
+    removed = defaultdict(int)
+    for f in faces:
+        if _key(f) in out_k and f.get("cluster"):
+            removed[f["cluster"]] += 1
+    if removed:
+        s = st.read_summary()
+        for c in s.get("clusters", []):
+            if c["cluster"] in removed:
+                c["size"] = max(0, c["size"] - removed[c["cluster"]])
+        st.write_summary(s)
+    res = {"sha": str(sha), "face": int(face), "person": person, "removed": len(out_k), "auto_removed": len(out_k) - 1}
+    print(f"[not_person] {res} {time.time() - t0:.1f}s")
     return res

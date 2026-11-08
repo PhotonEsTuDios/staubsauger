@@ -411,3 +411,41 @@ def test_nicht_person_bleibt_nach_neuem_lauf_draussen(monkeypatch):
     assert all(st.faces[(f"a{i}", 0)]["person"] == "Santi" for i in range(30))
     assert all(st.faces[(f"b{i}", 0)].get("person") != "Santi" for i in range(6))
     assert st.faces[("b0", 0)].get("cluster") != st.faces[("a0", 0)]["cluster"]
+
+
+# ---- „✕ nicht <Person>“ (gallery#16) ------------------------------------------------------
+def _named_mixed(monkeypatch):
+    import handler
+    st = _mixed_store()
+    monkeypatch.setattr(handler, "_store", st)
+    for f in st.faces.values():
+        f["person"] = "Santi"  # Gruppe komplett als Santi benannt, 6 Fremde (b*) stecken drin
+    st.summary["clusters"][0]["person"] = "Santi"
+    return handler, st
+
+
+def test_nicht_person_nimmt_aehnliche_mit(monkeypatch):
+    handler, st = _named_mixed(monkeypatch)
+    out = handler.handler({"mode": "not_person", "sha": "b0", "face": 0, "person": "Santi"}, None)
+    assert out["removed"] == 6 and out["auto_removed"] == 5
+    for i in range(6):
+        f = st.faces[(f"b{i}", 0)]
+        assert "person" not in f and "cluster" not in f and f["not_person"] == "Santi"
+    assert all(st.faces[(f"a{i}", 0)]["person"] == "Santi" for i in range(30))
+    assert st.summary["clusters"][0]["size"] == 30
+    assert st.photos["b3"] == ([], [])
+
+
+def test_nicht_person_bleibt_draussen_nach_neuem_lauf(monkeypatch):
+    handler, st = _named_mixed(monkeypatch)
+    handler.handler({"mode": "not_person", "sha": "b0", "face": 0, "person": "Santi"}, None)
+    handler.handler({"mode": "cluster"}, None)
+    assert all(st.faces[(f"b{i}", 0)].get("person") != "Santi" for i in range(6))
+    assert all(st.faces[(f"a{i}", 0)]["person"] == "Santi" for i in range(30))
+
+
+def test_nicht_person_einzelnes_gesicht_ohne_aehnliche(monkeypatch):
+    handler, st = _named_mixed(monkeypatch)
+    out = handler.handler({"mode": "not_person", "sha": "a3", "face": 0, "person": "Santi"}, None)
+    assert out["removed"] == 1  # echtes Santi-Gesicht: keine anderen Santis mitreißen
+    assert sum(1 for i in range(30) if st.faces[(f"a{i}", 0)].get("person") == "Santi") == 29
