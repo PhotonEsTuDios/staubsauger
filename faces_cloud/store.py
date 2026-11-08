@@ -1,7 +1,8 @@
 """Speicher für die Gesichtserkennung (staubsauger#14): DynamoDB + S3, sonst nichts.
 
 Tabelle PHOTON_FACES_TABLE (PK sha256 S, SK face N, GSI cluster-index auf cluster), je Gesicht:
-  box [x,y,w,h relativ], score, px, vec (float16-Binär), crop (S3-Key), cluster, person, ignored
+  box [x,y,w,h relativ], score, px, vec (float16-Binär), crop (S3-Key), cluster, person, ignored,
+  not_person (Name, der für dieses Gesicht als falsch markiert wurde, gallery#10)
 Foto-Tabelle PHOTON_TABLE: face_version, face_count, faces_at, face_clusters, persons
 S3: faces/<sha>_<i>.jpg (Ausschnitt), faces/clusters.json (Übersicht für die Gallery)
 """
@@ -108,7 +109,7 @@ class Store:
 
     def all_faces(self, min_score=0.9, min_px=40):
         """Alle Gesichter, die fürs Gruppieren taugen (ohne ausgeblendete)."""
-        kw = {"ProjectionExpression": "sha256, face, vec, px, score, crop, #c, person, ignored",
+        kw = {"ProjectionExpression": "sha256, face, vec, px, score, crop, #c, person, ignored, not_person",
               "ExpressionAttributeNames": {"#c": "cluster"}}
         out = []
         while True:
@@ -122,6 +123,21 @@ class Store:
 
     def faces_of_cluster(self, cluster):
         return self._query_all(IndexName=CLUSTER_INDEX, KeyConditionExpression=Key("cluster").eq(cluster))
+
+    def vectors(self, keys):
+        """{(sha, face): vec-Bytes} für viele Gesichter (der Gruppen-Index enthält keine Vektoren)."""
+        client, out = self.faces.meta.client, {}
+        todo = [{"sha256": s, "face": int(f)} for s, f in keys]
+        for i in range(0, len(todo), 100):
+            req = {FACES_TABLE: {"Keys": todo[i:i + 100], "ProjectionExpression": "sha256, face, vec"}}
+            for _ in range(10):
+                r = client.batch_get_item(RequestItems=req)
+                for it in r["Responses"].get(FACES_TABLE, []):
+                    out[(str(it["sha256"]), int(it["face"]))] = bytes(it["vec"].value if hasattr(it["vec"], "value") else it["vec"])
+                req = r.get("UnprocessedKeys") or {}
+                if not req:
+                    break
+        return out
 
     def faces_of_photo(self, sha):
         return self._query_all(KeyConditionExpression=Key("sha256").eq(sha),

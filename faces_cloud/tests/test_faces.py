@@ -189,6 +189,9 @@ class MemStore:
     def faces_of_photo(self, sha):
         return [dict(f) for (s, _), f in self.faces.items() if s == sha]
 
+    def vectors(self, keys):
+        return {(s, int(f)): self.faces[(s, int(f))]["vec"] for s, f in keys if (s, int(f)) in self.faces}
+
     def set_face(self, sha, face, **fields):
         self.writes += 1
         f = self.faces[(sha, face)]
@@ -325,3 +328,86 @@ def test_name_ohne_sonderzeichen():
     with pytest.raises(ValueError):
         people.clean_name("Santi, Nepo")
     assert people.clean_name("  Santi   Häring ") == "Santi Häring"
+
+
+# ---- Prüfen mit Stichprobe (gallery#10) ------------------------------------------------------
+def _mixed_store(n_main=30, n_wrong=6, seed=3):
+    """Eine Gruppe c0001: 30 Gesichter von A + 6 von B (falsch hineingeraten)."""
+    vecs, labels = _synthetic(n_people=2, per=max(n_main, n_wrong), seed=seed)
+    a = [v for v, l in zip(vecs, labels) if l == 0][:n_main]
+    b = [v for v, l in zip(vecs, labels) if l == 1][:n_wrong]
+    faces = [{"sha256": f"a{i}", "face": 0, "vec": detect.vec_to_bytes(v), "px": 80, "score": 0.95,
+              "crop": f"faces/a{i}_0.jpg", "cluster": "c0001"} for i, v in enumerate(a)]
+    faces += [{"sha256": f"b{i}", "face": 0, "vec": detect.vec_to_bytes(v), "px": 80, "score": 0.95,
+               "crop": f"faces/b{i}_0.jpg", "cluster": "c0001"} for i, v in enumerate(b)]
+    st = MemStore(faces)
+    st.summary = {"clusters": [{"cluster": "c0001", "size": 36, "photos": 36, "person": None,
+                                "samples": ["faces/a0_0.jpg", "faces/b0_0.jpg"]}]}
+    return st
+
+
+def test_stichprobe_ausreisser_zuerst(monkeypatch):
+    import handler
+    st = _mixed_store()
+    monkeypatch.setattr(handler, "_store", st)
+    out = handler.handler({"mode": "sample", "cluster": "c0001", "n": 10}, None)
+    assert out["size"] == 36 and len(out["faces"]) == 10 and out["next"] == 10
+    first = [f["sha"] for f in out["faces"][:6]]
+    assert sum(s.startswith("b") for s in first) >= 5  # die Fremden stehen vorn
+    rest = handler.handler({"mode": "sample", "cluster": "c0001", "n": 10, "offset": 30}, None)
+    assert len(rest["faces"]) == 6 and rest["next"] is None
+
+
+def test_sample_order_vollstaendig_ohne_doppelte():
+    import people
+    sims = np.random.default_rng(1).random(97)
+    order = people.sample_order(sims, 40)
+    assert sorted(order) == list(range(97))
+    assert len(people.sample_order(np.array([0.5, 0.2]), 40)) == 2
+
+
+def test_bestaetigen_entfernt_markierte_und_aehnliche(monkeypatch):
+    import handler
+    st = _mixed_store()
+    monkeypatch.setattr(handler, "_store", st)
+    # Dani sieht nur 10 (8 von A, 2 von B) und markiert die 2 falschen
+    shown = [{"sha": f"a{i}", "face": 0} for i in range(8)] + [{"sha": "b0", "face": 0}, {"sha": "b1", "face": 0}]
+    wrong = shown[-2:]
+    out = handler.handler({"mode": "confirm", "cluster": "c0001", "person": "Santi", "wrong": wrong, "shown": shown}, None)
+    assert out["removed"] == 2 and out["auto_removed"] == 4 and out["faces"] == 30
+    assert all(st.faces[(f"a{i}", 0)]["person"] == "Santi" for i in range(30))
+    for i in range(6):
+        f = st.faces[(f"b{i}", 0)]
+        assert "person" not in f and "cluster" not in f and f["not_person"] == "Santi"
+        assert st.photos[f"b{i}"] == ([], [])
+    assert st.photos["a5"] == (["c0001"], ["Santi"])
+    c = st.summary["clusters"][0]
+    assert c["person"] == "Santi" and c["size"] == 30 and c["samples"] == ["faces/a0_0.jpg"]
+
+
+def test_bestaetigen_ohne_falsche_benennt_alle(monkeypatch):
+    import handler
+    st = _mixed_store(n_wrong=0)
+    monkeypatch.setattr(handler, "_store", st)
+    out = handler.handler({"mode": "confirm", "cluster": "c0001", "person": "Ana", "wrong": [],
+                           "shown": [{"sha": "a1", "face": 0}]}, None)
+    assert out["faces"] == 30 and out["removed"] == 0 and out["auto_removed"] == 0
+
+
+def test_bestaetigen_braucht_namen(monkeypatch):
+    import handler
+    monkeypatch.setattr(handler, "_store", _mixed_store())
+    with pytest.raises(ValueError):
+        handler.handler({"mode": "confirm", "cluster": "c0001", "person": " ", "wrong": [], "shown": []}, None)
+
+
+def test_nicht_person_bleibt_nach_neuem_lauf_draussen(monkeypatch):
+    import handler
+    st = _mixed_store()
+    monkeypatch.setattr(handler, "_store", st)
+    shown = [{"sha": "a0", "face": 0}, {"sha": "b0", "face": 0}]
+    handler.handler({"mode": "confirm", "cluster": "c0001", "person": "Santi", "wrong": shown[1:], "shown": shown}, None)
+    handler.handler({"mode": "cluster"}, None)  # nächtlicher Lauf
+    assert all(st.faces[(f"a{i}", 0)]["person"] == "Santi" for i in range(30))
+    assert all(st.faces[(f"b{i}", 0)].get("person") != "Santi" for i in range(6))
+    assert st.faces[("b0", 0)].get("cluster") != st.faces[("a0", 0)]["cluster"]

@@ -43,7 +43,7 @@ aws iam put-role-policy --role-name $ROLE --policy-name faces --policy-document 
  \"Version\":\"2012-10-17\",\"Statement\":[
   {\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\"],\"Resource\":\"arn:aws:s3:::$B/*\"},
   {\"Effect\":\"Allow\",\"Action\":[\"s3:PutObject\"],\"Resource\":\"arn:aws:s3:::$B/faces/*\"},
-  {\"Effect\":\"Allow\",\"Action\":[\"dynamodb:Scan\",\"dynamodb:Query\",\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":[\"arn:aws:dynamodb:$R:$A:table/$T\",\"arn:aws:dynamodb:$R:$A:table/$FT\",\"arn:aws:dynamodb:$R:$A:table/$FT/index/*\"]},
+  {\"Effect\":\"Allow\",\"Action\":[\"dynamodb:Scan\",\"dynamodb:Query\",\"dynamodb:GetItem\",\"dynamodb:BatchGetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":[\"arn:aws:dynamodb:$R:$A:table/$T\",\"arn:aws:dynamodb:$R:$A:table/$FT\",\"arn:aws:dynamodb:$R:$A:table/$FT/index/*\"]},
   {\"Effect\":\"Allow\",\"Action\":[\"sqs:SendMessage\",\"sqs:ReceiveMessage\",\"sqs:DeleteMessage\",\"sqs:GetQueueAttributes\",\"sqs:ChangeMessageVisibility\"],\"Resource\":\"$Q_ARN\"},
   {\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"arn:aws:logs:$R:$A:*\"}
  ]}"

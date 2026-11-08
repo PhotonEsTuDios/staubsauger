@@ -6,6 +6,8 @@ Nur Ablauf; Bildlogik in detect.py, Gruppieren in cluster.py, Personen in people
   SQS-Records                    Worker: Gesichter finden, Vektor + Ausschnitt speichern.
   {"mode": "cluster"}            Alle Gesichter zu Personen-Gruppen bündeln (täglich nach dem Plan).
   {"mode": "name"|"hide"|"reject"|"name_face", ...}  Benennen aus der Gallery (people.py).
+  {"mode": "sample", "cluster", "n"?, "offset"?}       Stichprobe zum Prüfen (gallery#10).
+  {"mode": "confirm", "cluster", "person", "wrong", "shown"}  Name + falsche raus (gallery#10).
 """
 import json
 import os
@@ -24,7 +26,8 @@ QUEUE_URL = os.environ.get("PHOTON_QUEUE_URL", "")
 WORKERS = int(os.environ.get("PHOTON_WORKERS", "3"))
 PKG = int(os.environ.get("PHOTON_PKG", "25"))
 PEOPLE_MODES = {"name": ("cluster", "person"), "hide": ("cluster",),
-                "reject": ("sha", "face"), "name_face": ("sha", "face", "person")}
+                "reject": ("sha", "face"), "name_face": ("sha", "face", "person"),
+                "confirm": ("cluster", "person", "wrong", "shown")}
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 
 _store = None
@@ -94,6 +97,9 @@ def handler(event, context):
         return plan(event)
     if mode == "cluster":
         return people.run_cluster(store(), float(event.get("threshold") or clu.THRESHOLD))
+    if mode == "sample":
+        return people.sample(store(), event["cluster"], int(event.get("n") or people.SAMPLE_N),
+                             int(event.get("offset") or 0))
     if mode in PEOPLE_MODES:  # aus der Gallery (gallery#7/#9), synchron
         args = {k: event[k] for k in PEOPLE_MODES[mode]}
         return getattr(people, mode)(store(), **args)
